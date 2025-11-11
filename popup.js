@@ -16,6 +16,11 @@ document.addEventListener('DOMContentLoaded', async function() {
     
     let isRunning = false;
     
+    // Initialize stop button as disabled
+    if (stopBtn) {
+        stopBtn.disabled = true;
+    }
+    
     // Load saved repetition count, dynamic batch setting and keyword batch size
     chrome.storage.local.get(['repetitionCount', 'useDynamicBatch', 'autoCopyResponse', 'keywordBatchSize', 'numberOfTabs'], (result) => {
         if (repetitionInput) {
@@ -184,6 +189,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                 runBtn.style.display = 'block';
                 runBtn.disabled = true;
                 stopBtn.style.display = 'block';
+                stopBtn.disabled = false;
                 
                 // Restore progress
                 const current = collectionState.currentIndex || 0;
@@ -302,6 +308,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                 runBtn.style.display = 'block';
                 runBtn.disabled = true;
                 stopBtn.style.display = 'block';
+                stopBtn.disabled = false;
                 status.textContent = 'Starting collection...';
                 
                 const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
@@ -325,6 +332,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                 runBtn.style.display = 'block';
                 runBtn.disabled = true;
                 stopBtn.style.display = 'block';
+                stopBtn.disabled = false;
                 status.textContent = `Pre-initializing ${numberOfTabs} tabs...`;
                 
                 // Wait a moment for UI update
@@ -350,7 +358,8 @@ document.addEventListener('DOMContentLoaded', async function() {
             isRunning = false;
             runBtn.style.display = 'block';
             runBtn.disabled = false;
-            stopBtn.style.display = 'none';
+            stopBtn.style.display = 'block';
+            stopBtn.disabled = true;
         }
     }
     
@@ -360,7 +369,8 @@ document.addEventListener('DOMContentLoaded', async function() {
         isRunning = false;
         runBtn.style.display = 'block';
         runBtn.disabled = false;
-        stopBtn.style.display = 'none';
+        stopBtn.style.display = 'block';
+        stopBtn.disabled = true;
         status.textContent = 'Stopping collection...';
         
         // Send IMMEDIATE stop message to ALL tabs (not just active)
@@ -490,7 +500,8 @@ document.addEventListener('DOMContentLoaded', async function() {
             isRunning = false;
             runBtn.style.display = 'block';
             runBtn.disabled = false;
-            stopBtn.style.display = 'none';
+            stopBtn.style.display = 'block';
+            stopBtn.disabled = true;
             
             let completeMessage = `Collection complete! Processed ${request.total} cities`;
             if (request.loopIterations && request.loopIterations > 0) {
