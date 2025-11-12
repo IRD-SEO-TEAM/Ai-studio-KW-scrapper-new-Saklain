@@ -167,6 +167,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         if (!currentTab.url.includes('aistudio.google.com')) {
             status.textContent = 'Please navigate to AI Studio first';
             runBtn.disabled = true;
+            stopBtn.disabled = true;
         } else {
             // Restore state from storage
             await restoreState();
@@ -220,8 +221,10 @@ document.addEventListener('DOMContentLoaded', async function() {
                 }
             } else if (cityData.length > 0) {
                 status.textContent = `Ready - ${cityData.length} cities already collected`;
+                stopBtn.disabled = true;
             } else {
                 status.textContent = 'Ready to start';
+                stopBtn.disabled = true;
             }
         } catch (error) {
             console.error('Error restoring state:', error);

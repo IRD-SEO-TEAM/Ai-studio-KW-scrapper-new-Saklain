@@ -430,31 +430,53 @@ async function loadCityList(repetitionCount = 1) {
 }
 
 function parseCSV(csvText, repetitionCount = 1) {
-    const lines = csvText.split('\n');
-    const uniqueCities = [];
-    const inputCounts = {};
+    // For multi-line inputs, treat the entire content as a single entry
+    // Remove leading/trailing whitespace and check if it's a multi-line input
+    const trimmedText = csvText.trim();
     
-    for (let i = 0; i < lines.length; i++) {
-        const line = lines[i].trim();
-        if (line && !line.startsWith('#')) {
-            const city = line.replace(/^["']|["']$/g, '').trim();
-            if (city && !uniqueCities.includes(city)) {
-                uniqueCities.push(city);
+    // Check if this is a multi-line input (contains multiple meaningful lines)
+    const lines = trimmedText.split('\n').filter(line => line.trim() && !line.trim().startsWith('#'));
+    
+    if (lines.length > 1) {
+        // This is a multi-line input, treat the entire content as a single entry
+        const cities = [];
+        for (let i = 0; i < repetitionCount; i++) {
+            cities.push(trimmedText);
+        }
+        
+        const inputCounts = {};
+        inputCounts[trimmedText] = repetitionCount;
+        
+        chrome.storage.local.set({ inputCounts: inputCounts });
+        console.log(`Parsed multi-line input as single entry, repeated ${repetitionCount}x = ${cities.length} total`);
+        return cities;
+    } else {
+        // Original logic for single-line inputs
+        const uniqueCities = [];
+        const inputCounts = {};
+        
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (line && !line.startsWith('#')) {
+                const city = line.replace(/^["']|["']$/g, '').trim();
+                if (city && !uniqueCities.includes(city)) {
+                    uniqueCities.push(city);
+                }
             }
         }
+        
+        const cities = [];
+        uniqueCities.forEach(city => {
+            for (let i = 0; i < repetitionCount; i++) {
+                cities.push(city);
+            }
+            inputCounts[city] = repetitionCount;
+        });
+        
+        chrome.storage.local.set({ inputCounts: inputCounts });
+        console.log(`Parsed ${uniqueCities.length} unique cities, repeated ${repetitionCount}x = ${cities.length} total`);
+        return cities;
     }
-    
-    const cities = [];
-    uniqueCities.forEach(city => {
-        for (let i = 0; i < repetitionCount; i++) {
-            cities.push(city);
-        }
-        inputCounts[city] = repetitionCount;
-    });
-    
-    chrome.storage.local.set({ inputCounts: inputCounts });
-    console.log(`Parsed ${uniqueCities.length} unique cities, repeated ${repetitionCount}x = ${cities.length} total`);
-    return cities;
 }
 
 async function enableGoogleSearchGrounding() {
@@ -576,8 +598,11 @@ async function processNextCity() {
             ? assignedStartIndex + currentIndex + 1 
             : currentIndex + 1;
             
-        await updateStatus(`Processing batch of ${batchOfKeywords.length} starting with: "${firstKeyword}" (Row ${actualRowNumber})`);
-        await updateProgress(currentIndex + batchOfKeywords.length, originalCityList.length, `Batch: ${firstKeyword}...`);
+        // Truncate the first keyword for display if it's too long
+        const displayKeyword = firstKeyword.length > 50 ? firstKeyword.substring(0, 50) + "..." : firstKeyword;
+        
+        await updateStatus(`Processing batch of ${batchOfKeywords.length} starting with: "${displayKeyword}" (Row ${actualRowNumber})`);
+        await updateProgress(currentIndex + batchOfKeywords.length, originalCityList.length, `Batch: ${displayKeyword}...`);
         
         await clearChatInput();
         await typeInChatInput(promptText);
@@ -755,7 +780,9 @@ async function typeInChatInput(text) {
         textarea.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true }));
         textarea.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, cancelable: true }));
         await wait(500);
-        console.log(`Typed "${text}" into chat input`);
+        // Truncate the text for console logging if it's too long
+        const logText = text.length > 100 ? text.substring(0, 100) + "..." : text;
+        console.log(`Typed "${logText}" into chat input (${text.length} characters total)`);
     } else {
         console.error('Textarea not found for typing');
         throw new Error('Chat input textarea not found');
