@@ -19,7 +19,7 @@
   "content_scripts": [
     {
       "matches": ["https://aistudio.google.com/*"],
-      "js": ["content.js"],
+      "js": ["xlsx.full.min.js", "content.js"],
       "run_at": "document_end"
     }
   ],
@@ -28,7 +28,7 @@
   },
   "web_accessible_resources": [
     {
-      "resources": ["input.csv", "system_prompt.txt"],
+      "resources": ["input.csv", "input (1).xlsx", "system_prompt.txt"],
       "matches": ["https://aistudio.google.com/*"]
     }
   ]

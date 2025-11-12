@@ -13,12 +13,48 @@ document.addEventListener('DOMContentLoaded', async function() {
     const autoCopyResponseCheckbox = document.getElementById('autoCopyResponse');
     const keywordBatchInput = document.getElementById('keywordBatchSize');
     const numberOfTabsInput = document.getElementById('numberOfTabs');
+    const excelFileInput = document.getElementById('excelFileInput');
+    const fileStatus = document.getElementById('fileStatus');
     
     let isRunning = false;
     
     // Initialize stop button as disabled
     if (stopBtn) {
         stopBtn.disabled = true;
+    }
+    
+    // File upload handler
+    if (excelFileInput) {
+        excelFileInput.addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            try {
+                fileStatus.textContent = 'Reading file...';
+                const arrayBuffer = await file.arrayBuffer();
+                
+                // Store file data in Chrome storage
+                const base64Data = btoa(
+                    new Uint8Array(arrayBuffer)
+                        .reduce((data, byte) => data + String.fromCharCode(byte), '')
+                );
+                
+                await chrome.storage.local.set({
+                    uploadedExcelFile: base64Data,
+                    uploadedFileName: file.name,
+                    uploadedFileTimestamp: new Date().toISOString()
+                });
+                
+                fileStatus.textContent = `✓ ${file.name} uploaded`;
+                fileStatus.style.color = 'green';
+                
+                console.log('Excel file uploaded and stored');
+            } catch (error) {
+                fileStatus.textContent = `✗ Error: ${error.message}`;
+                fileStatus.style.color = 'red';
+                console.error('File upload error:', error);
+            }
+        });
     }
     
     // Load saved repetition count, dynamic batch setting and keyword batch size
@@ -282,26 +318,101 @@ document.addEventListener('DOMContentLoaded', async function() {
             const repetitionCount = settings.repetitionCount || 1;
             const keywordsPerPrompt = settings.keywordBatchSize || 5; // ADDED: Get keywordsPerPrompt from storage
             
-            // Load CSV to get total count
-            const response = await fetch(chrome.runtime.getURL('input.csv'));
-            const csvText = await response.text();
-            const lines = csvText.split('\n');
-            const uniqueCities = [];
-            
-            for (let i = 0; i < lines.length; i++) {
-                const line = lines[i].trim();
-                if (line && !line.startsWith('#')) {
-                    const city = line.replace(/^["']|["']$/g, '').trim();
-                    if (city && !uniqueCities.includes(city)) {
-                        uniqueCities.push(city);
+            // Try to load from Excel file first
+            let uniqueCities = [];
+            try {
+                console.log('Popup: Attempting to load Excel file: input (1).xlsx');
+                const response = await fetch(chrome.runtime.getURL('input (1).xlsx'));
+                
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch Excel file: ${response.status} ${response.statusText}`);
+                }
+                
+                const arrayBuffer = await response.arrayBuffer();
+                console.log('Popup: Excel file loaded, size:', arrayBuffer.byteLength, 'bytes');
+                
+                if (arrayBuffer.byteLength === 0) {
+                    throw new Error('Excel file is empty');
+                }
+                
+                const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+                console.log('Popup: Excel workbook loaded, sheets:', workbook.SheetNames);
+                
+                if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
+                    throw new Error('No sheets found in Excel file');
+                }
+                
+                // Get first worksheet
+                const firstSheetName = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[firstSheetName];
+                console.log('Popup: Using sheet:', firstSheetName);
+                
+                // Convert to JSON
+                const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+                console.log('Popup: Excel data converted to JSON, rows:', jsonData.length);
+                
+                if (!jsonData || jsonData.length === 0) {
+                    throw new Error('No data found in Excel sheet');
+                }
+                
+                // Extract keywords from first column
+                for (let i = 0; i < jsonData.length; i++) {
+                    const row = jsonData[i];
+                    if (!row || row.length === 0) continue;
+                    
+                    const cellValue = row[0]; // First column
+                    if (cellValue !== undefined && cellValue !== null && cellValue !== '') {
+                        const keyword = String(cellValue).trim();
+                        if (keyword && !uniqueCities.includes(keyword)) {
+                            uniqueCities.push(keyword);
+                        }
                     }
+                }
+                
+                console.log('Popup: Extracted keywords:', uniqueCities.slice(0, 5), '... total:', uniqueCities.length);
+                
+                if (uniqueCities.length === 0) {
+                    throw new Error('No valid keywords found in Excel file');
+                }
+                
+                console.log(`Loaded ${uniqueCities.length} unique keywords from Excel file`);
+            } catch (excelError) {
+                console.warn('Popup: Failed to load Excel file, falling back to CSV:', excelError);
+                
+                // Fallback to CSV if Excel loading fails
+                try {
+                    const response = await fetch(chrome.runtime.getURL('input.csv'));
+                    if (!response.ok) {
+                        throw new Error(`Failed to fetch CSV file: ${response.status} ${response.statusText}`);
+                    }
+                    const csvText = await response.text();
+                    const lines = csvText.split('\n');
+                    
+                    for (let i = 0; i < lines.length; i++) {
+                        const line = lines[i].trim();
+                        if (line && !line.startsWith('#')) {
+                            const city = line.replace(/^["']|["']$/g, '').trim();
+                            if (city && !uniqueCities.includes(city)) {
+                                uniqueCities.push(city);
+                            }
+                        }
+                    }
+                    
+                    console.log(`Loaded ${uniqueCities.length} unique keywords from CSV file`);
+                } catch (csvError) {
+                    console.warn('Popup: Failed to load CSV file:', csvError);
+                    
+                    // If both Excel and CSV fail, create a default list
+                    console.log('Popup: Creating default keyword list as fallback...');
+                    uniqueCities = ['default keyword'];
+                    console.log(`Created default list with ${uniqueCities.length} keywords`);
                 }
             }
             
             const totalKeywords = uniqueCities.length * repetitionCount;
             
             if (totalKeywords === 0) {
-                status.textContent = 'No keywords found in input.csv';
+                status.textContent = 'No keywords found in input file';
                 return;
             }
             
@@ -325,7 +436,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                 });
                 
                 if (response && response.success) {
-                    status.textContent = 'Collection started - processing cities...';
+                    status.textContent = 'Collection started - processing keywords...';
                 } else {
                     throw new Error(response?.error || 'Failed to start collection');
                 }

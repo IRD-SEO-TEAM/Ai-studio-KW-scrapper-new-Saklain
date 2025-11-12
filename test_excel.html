@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Excel Reader Test</title>
+    <script src="xlsx.full.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        button { padding: 10px; margin: 10px 0; }
+        .debug { background: #f0f0f0; padding: 10px; margin: 10px 0; border-radius: 5px; }
+        .error { background: #ffebee; color: #d32f2f; padding: 10px; margin: 10px 0; border-radius: 5px; }
+        .success { background: #e8f5e9; color: #2e7d32; padding: 10px; margin: 10px 0; border-radius: 5px; }
+    </style>
+</head>
+<body>
+    <h1>Excel Reader Test</h1>
+    <button id="loadExcel">Load Excel File</button>
+    <div id="output"></div>
+
+    <script>
+        document.getElementById('loadExcel').addEventListener('click', async function() {
+            const output = document.getElementById('output');
+            output.innerHTML = '<div class="debug">Loading Excel file...</div>';
+            
+            try {
+                // Step 1: Fetch the file
+                console.log('Step 1: Fetching Excel file');
+                const response = await fetch('input (1).xlsx');
+                
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch Excel file: ${response.status} ${response.statusText}`);
+                }
+                
+                output.innerHTML += '<div class="success">✓ File fetched successfully</div>';
+                
+                // Step 2: Get array buffer
+                console.log('Step 2: Getting array buffer');
+                const arrayBuffer = await response.arrayBuffer();
+                console.log('Array buffer size:', arrayBuffer.byteLength, 'bytes');
+                
+                if (arrayBuffer.byteLength === 0) {
+                    throw new Error('Excel file is empty');
+                }
+                
+                output.innerHTML += `<div class="success">✓ Array buffer created (${arrayBuffer.byteLength} bytes)</div>`;
+                
+                // Step 3: Read with XLSX
+                console.log('Step 3: Reading with XLSX');
+                const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+                console.log('Workbook:', workbook);
+                
+                if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
+                    throw new Error('No sheets found in Excel file');
+                }
+                
+                output.innerHTML += `<div class="success">✓ Workbook loaded with sheets: ${workbook.SheetNames.join(', ')}</div>`;
+                
+                // Step 4: Get first worksheet
+                console.log('Step 4: Getting first worksheet');
+                const firstSheetName = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[firstSheetName];
+                console.log('Using sheet:', firstSheetName);
+                
+                output.innerHTML += `<div class="success">✓ Using sheet: ${firstSheetName}</div>`;
+                
+                // Step 5: Convert to JSON
+                console.log('Step 5: Converting to JSON');
+                const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+                console.log('JSON data:', jsonData);
+                
+                if (!jsonData || jsonData.length === 0) {
+                    throw new Error('No data found in Excel sheet');
+                }
+                
+                output.innerHTML += `<div class="success">✓ Converted to JSON (${jsonData.length} rows)</div>`;
+                
+                // Step 6: Extract keywords
+                console.log('Step 6: Extracting keywords');
+                const keywords = [];
+                for (let i = 0; i < jsonData.length; i++) {
+                    const row = jsonData[i];
+                    if (!row || row.length === 0) continue;
+                    
+                    const cellValue = row[0]; // First column
+                    if (cellValue !== undefined && cellValue !== null && cellValue !== '') {
+                        const keyword = String(cellValue).trim();
+                        if (keyword && !keywords.includes(keyword)) {
+                            keywords.push(keyword);
+                        }
+                    }
+                }
+                
+                console.log('Extracted keywords:', keywords);
+                
+                if (keywords.length === 0) {
+                    throw new Error('No valid keywords found in Excel file');
+                }
+                
+                output.innerHTML += `
+                    <div class="success">✓ Extracted ${keywords.length} unique keywords</div>
+                    <h2>First 10 keywords:</h2>
+                    <ul>
+                        ${keywords.slice(0, 10).map(k => `<li>${k}</li>`).join('')}
+                        ${keywords.length > 10 ? '<li>... and more</li>' : ''}
+                    </ul>
+                `;
+            } catch (error) {
+                console.error('Error:', error);
+                output.innerHTML += `<div class="error">✗ Error: ${error.message}</div>`;
+            }
+        });
+    </script>
+</body>
+</html>

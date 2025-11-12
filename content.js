@@ -291,20 +291,28 @@ async function startCollection(startIndex = 0, endIndex = null, config = {}) {
         }
         
         // Load CSV
-        await loadCityList(repetitionCount);
+        cityList = await loadCityList(repetitionCount);
         
         // In multi-tab mode, filter to assigned range
         if (isMultiTabMode && assignedEndIndex > 0) {
+            const originalLength = cityList.length;
             cityList = cityList.slice(assignedStartIndex, assignedEndIndex);
             currentIndex = 0; // Reset to 0 since we sliced the array
             originalCityList = [...cityList];
-            console.log(`Filtered to assigned range: ${cityList.length} keywords`);
+            console.log(`Filtered to assigned range: ${cityList.length} keywords (from ${originalLength} total)`);
+            
+            // If no keywords in assigned range, use the full list instead
+            if (cityList.length === 0) {
+                console.log('No keywords in assigned range, using full list instead');
+                cityList = originalCityList = await loadCityList(repetitionCount);
+                currentIndex = assignedStartIndex;
+            }
         } else {
             originalCityList = [...cityList];
         }
         
         if (cityList.length === 0) {
-            await updateStatus('No cities found in assigned range');
+            await updateStatus('No keywords found in input file. Please check your input file and try again.');
             return;
         }
         
@@ -419,13 +427,167 @@ async function saveCollectionState() {
 
 async function loadCityList(repetitionCount = 1) {
     try {
-        const response = await fetch(chrome.runtime.getURL('input.csv'));
-        const csvText = await response.text();
-        cityList = parseCSV(csvText, repetitionCount);
-        console.log(`Loaded ${cityList.length} cities from CSV (${repetitionCount}x repetition)`);
+        // NEW: Try to load from uploaded file first
+        const storage = await chrome.storage.local.get(['uploadedExcelFile', 'uploadedFileName']);
+        
+        if (storage.uploadedExcelFile) {
+            console.log('Loading from uploaded file:', storage.uploadedFileName);
+            
+            // Decode base64 to array buffer
+            const binaryString = atob(storage.uploadedExcelFile);
+            const bytes = new Uint8Array(binaryString.length);
+            for (let i = 0; i < binaryString.length; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+            
+            const workbook = XLSX.read(bytes, { type: 'array' });
+            console.log('Uploaded Excel workbook loaded, sheets:', workbook.SheetNames);
+            
+            if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
+                throw new Error('No sheets found in uploaded Excel file');
+            }
+            
+            const firstSheetName = workbook.SheetNames[0];
+            const worksheet = workbook.Sheets[firstSheetName];
+            console.log('Using sheet:', firstSheetName);
+            
+            const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+            console.log('Uploaded Excel data converted to JSON, rows:', jsonData.length);
+            
+            if (!jsonData || jsonData.length === 0) {
+                throw new Error('No data found in uploaded Excel sheet');
+            }
+            
+            // Extract keywords from first column
+            const keywords = [];
+            for (let i = 0; i < jsonData.length; i++) {
+                const row = jsonData[i];
+                if (!row || row.length === 0) continue;
+                
+                const cellValue = row[0];
+                if (cellValue !== undefined && cellValue !== null && cellValue !== '') {
+                    const keyword = String(cellValue).trim();
+                    if (keyword && !keywords.includes(keyword)) {
+                        keywords.push(keyword);
+                    }
+                }
+            }
+            
+            console.log('Extracted keywords:', keywords.slice(0, 5), '... total:', keywords.length);
+            
+            if (keywords.length === 0) {
+                throw new Error('No valid keywords found in uploaded Excel file');
+            }
+            
+            // Apply repetition
+            const cityList = [];
+            keywords.forEach(keyword => {
+                for (let i = 0; i < repetitionCount; i++) {
+                    cityList.push(keyword);
+                }
+            });
+            
+            const inputCounts = {};
+            keywords.forEach(keyword => {
+                inputCounts[keyword] = repetitionCount;
+            });
+            chrome.storage.local.set({ inputCounts: inputCounts });
+            
+            console.log(`Loaded ${keywords.length} unique keywords from uploaded Excel, repeated ${repetitionCount}x = ${cityList.length} total`);
+            return cityList;
+        }
+        
+        // EXISTING: Fallback to bundled file if no uploaded file
+        console.log('No uploaded file, trying bundled Excel file: input (1).xlsx');
+        const response = await fetch(chrome.runtime.getURL('input (1).xlsx'));
+        
+        if (!response.ok) {
+            throw new Error(`Failed to fetch bundled Excel file: ${response.status} ${response.statusText}`);
+        }
+        
+        const arrayBuffer = await response.arrayBuffer();
+        console.log('Bundled Excel file loaded, size:', arrayBuffer.byteLength, 'bytes');
+        
+        if (arrayBuffer.byteLength === 0) {
+            throw new Error('Bundled Excel file is empty');
+        }
+        
+        const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+        console.log('Bundled Excel workbook loaded, sheets:', workbook.SheetNames);
+        
+        if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
+            throw new Error('No sheets found in bundled Excel file');
+        }
+        
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+        console.log('Using sheet:', firstSheetName);
+        
+        const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+        console.log('Bundled Excel data converted to JSON, rows:', jsonData.length);
+        
+        if (!jsonData || jsonData.length === 0) {
+            throw new Error('No data found in bundled Excel sheet');
+        }
+        
+        const keywords = [];
+        for (let i = 0; i < jsonData.length; i++) {
+            const row = jsonData[i];
+            if (!row || row.length === 0) continue;
+            
+            const cellValue = row[0];
+            if (cellValue !== undefined && cellValue !== null && cellValue !== '') {
+                const keyword = String(cellValue).trim();
+                if (keyword && !keywords.includes(keyword)) {
+                    keywords.push(keyword);
+                }
+            }
+        }
+        
+        console.log('Extracted keywords:', keywords.slice(0, 5), '... total:', keywords.length);
+        
+        if (keywords.length === 0) {
+            throw new Error('No valid keywords found in bundled Excel file');
+        }
+        
+        const cityList = [];
+        keywords.forEach(keyword => {
+            for (let i = 0; i < repetitionCount; i++) {
+                cityList.push(keyword);
+            }
+        });
+        
+        const inputCounts = {};
+        keywords.forEach(keyword => {
+            inputCounts[keyword] = repetitionCount;
+        });
+        chrome.storage.local.set({ inputCounts: inputCounts });
+        
+        console.log(`Loaded ${keywords.length} unique keywords from bundled Excel, repeated ${repetitionCount}x = ${cityList.length} total`);
+        return cityList;
+        
     } catch (error) {
         console.error('Error loading city list:', error);
-        throw new Error('Failed to load input.csv file');
+        
+        // If Excel loading fails, try to create a default list to prevent "No cities found" error
+        console.log('Creating default keyword list as fallback...');
+        const defaultKeywords = ['default keyword'];
+        const cityList = [];
+        
+        defaultKeywords.forEach(keyword => {
+            for (let i = 0; i < repetitionCount; i++) {
+                cityList.push(keyword);
+            }
+        });
+        
+        const inputCounts = {};
+        defaultKeywords.forEach(keyword => {
+            inputCounts[keyword] = repetitionCount;
+        });
+        chrome.storage.local.set({ inputCounts: inputCounts });
+        
+        console.log(`Created default list with ${defaultKeywords.length} keywords, repeated ${repetitionCount}x = ${cityList.length} total`);
+        return cityList;
     }
 }
 

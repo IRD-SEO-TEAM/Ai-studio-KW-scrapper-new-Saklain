@@ -205,6 +205,11 @@
             </div>
         </div>
         <div class="section">
+            <label for="excelFileInput">Upload Excel File:</label>
+            <input type="file" id="excelFileInput" accept=".xlsx,.xls" />
+            <span id="fileStatus" style="font-size: 12px; color: #666;"></span>
+        </div>
+        <div class="section">
             <div class="stats">
                 <span id="storageCount">Stored rows: 0</span>
                 <button id="clearBtn" class="clear-btn" style="padding: 4px 10px; font-size: 12px;">Clear</button>
@@ -218,6 +223,7 @@
         </div>
     </div>
     
+    <script src="xlsx.full.min.js"></script>
     <script src="popup.js"></script>
 </body>
 </html>

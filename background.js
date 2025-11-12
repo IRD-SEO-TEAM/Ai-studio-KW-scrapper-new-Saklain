@@ -77,6 +77,17 @@ async function initiateMultiTabCollection(config) {
     
     console.log(`Initiating serial multi-tab collection: ${numberOfTabs} tabs, ${totalKeywords} keywords, ${keywordsPerPrompt} keywords per prompt`);
     
+    // Validate inputs
+    if (!numberOfTabs || numberOfTabs < 1) {
+        console.error('Invalid number of tabs:', numberOfTabs);
+        return;
+    }
+    
+    if (!totalKeywords || totalKeywords < 1) {
+        console.error('Invalid total keywords:', totalKeywords);
+        return;
+    }
+    
     // Reset multi-tab state
     multiTabState = {
         isActive: true,
@@ -113,6 +124,12 @@ async function initiateMultiTabCollection(config) {
     const tab1StartIndex = startRow - 1;
     const tab1EndIndex = Math.min(tab1StartIndex + keywordsPerTab, totalKeywords);
     
+    // Ensure we have valid indices
+    if (tab1StartIndex < 0 || tab1EndIndex <= 0 || tab1StartIndex >= totalKeywords) {
+        console.error('Invalid start/end indices for Tab 1:', { tab1StartIndex, tab1EndIndex, totalKeywords });
+        return;
+    }
+    
     multiTabState.tabIds.push(currentTab.id);
     multiTabState.tabsCreated = 1;
     multiTabState.tabAssignments[currentTab.id] = {
@@ -135,6 +152,12 @@ async function initiateMultiTabCollection(config) {
         const endIndex = Math.min(startIndex + keywordsPerTab, totalKeywords);
         
         if (startIndex >= totalKeywords) break;
+        
+        // Ensure we have valid indices
+        if (startIndex < 0 || endIndex <= 0 || startIndex >= totalKeywords) {
+            console.warn(`Skipping Tab ${i + 1} due to invalid indices:`, { startIndex, endIndex, totalKeywords });
+            continue;
+        }
         
         multiTabState.tabAssignments[`pending_${i}`] = {
             startIndex: startIndex,
