@@ -280,10 +280,11 @@ async function startCollection(startIndex = 0, endIndex = null, config = {}) {
     
     try {
         // Get settings from storage
-        const settings = await chrome.storage.local.get(['repetitionCount', 'useDynamicBatch', 'autoCopyResponse', 'keywordBatchSize']);
+        const settings = await chrome.storage.local.get(['repetitionCount', 'useDynamicBatch', 'autoCopyResponse', 'keywordBatchSize', 'copyWholeSection']);
         const repetitionCount = config.repetitionCount || settings.repetitionCount || 1;
         useDynamicBatch = settings.useDynamicBatch || false;
         autoCopyResponse = settings.autoCopyResponse || false;
+        copyWholeSection = settings.copyWholeSection || false;
         
         // ADDED: Update KEYWORD_BATCH_SIZE from storage if not already set by config (for single-tab mode)
         if (!config.isMultiTabMode && settings.keywordBatchSize !== undefined && !KEYWORD_BATCH_SIZE_LOCKED) {
@@ -1116,23 +1117,27 @@ async function waitForResponseAndScrape(keywordInfo, baselineTablesCount = 0) {
                     }
                     
                     if (stableCount >= 2) {
-                        const structured = parseResultTable(targetTable);
+                        // Use "copy as text" to get AI response instead of parsing HTML
+                        const copiedText = await copyAIResponseAsText();
+                        if (!copiedText) {
+                            console.warn('Failed to copy AI response as text, retrying...');
+                            continue;
+                        }
+
+                        const structured = parseFromCopiedText(copiedText);
                         if (structured && structured.rows.length > 0) {
-                            // NEW: Capture whole section if enabled
-                            let wholeSectionData = '';
-                            if (copyWholeSection) {
-                                const modelContainers = document.querySelectorAll('.model-prompt-container[data-turn-role="Model"]');
-                                if (modelContainers.length > 0) {
-                                    const latestContainer = modelContainers[modelContainers.length - 1];
-                                    wholeSectionData = latestContainer.innerText || latestContainer.textContent || '';
-                                }
-                            }
-                            
-                            await saveStructuredCityData(logIdentifier, structured, targetTable.outerHTML, wholeSectionData);
-                            console.log(`✅ Scraped ${structured.rows.length} rows for ${logIdentifier}`);
-                            
+                            let wholeSectionData = copyWholeSection ? copiedText : '';
+
+                            await saveStructuredCityData(logIdentifier, structured, '', wholeSectionData);
+                            console.log(`✅ Parsed ${structured.rows.length} rows from copied text for ${logIdentifier}`);
+
                             if (autoCopyResponse) {
-                                await autoCopyAIResponse(inputForCopy);
+                                // Already copied, just save to storage
+                                const result = await chrome.storage.local.get(['copiedResponses']);
+                                const copiedResponses = result.copiedResponses || [];
+                                copiedResponses.push({ city: inputForCopy, text: copiedText, timestamp: new Date().toISOString() });
+                                await chrome.storage.local.set({ copiedResponses: copiedResponses });
+                                console.log(`✅ Auto-saved copied response for ${inputForCopy}`);
                             }
                             return;
                         }
@@ -1187,6 +1192,43 @@ async function autoCopyAIResponse(city) {
         console.log(`✅ Auto-copied and saved response for ${city} (${copiedText.length} chars)`);
     } catch (error) {
         console.error('Error auto-copying AI response:', error);
+    }
+}
+
+async function copyAIResponseAsText() {
+    if (!isCollecting) return null;
+
+    try {
+        console.log('Copying AI response as text...');
+
+        const optionsButton = document.querySelector('ms-chat-turn-options button[aria-label="Open options"]');
+        if (!optionsButton) {
+            console.warn('Options button not found for copy');
+            return null;
+        }
+        optionsButton.click();
+        console.log('Clicked options button');
+        await wait(500);
+        if (!isCollecting) return null;
+
+        const copyButton = Array.from(document.querySelectorAll('button[mat-menu-item]')).find(btn =>
+            btn.textContent.includes('Copy as text')
+        );
+        if (!copyButton) {
+            console.warn('Copy as text button not found');
+            return null;
+        }
+        copyButton.click();
+        console.log('Clicked copy as text button');
+        await wait(400);
+        if (!isCollecting) return null;
+
+        const copiedText = await navigator.clipboard.readText();
+        console.log(`✅ Copied AI response (${copiedText.length} chars)`);
+        return copiedText;
+    } catch (error) {
+        console.error('Error copying AI response as text:', error);
+        return null;
     }
 }
 
@@ -1269,6 +1311,109 @@ function parseResultTable(tableEl) {
         return { headers, rows };
     } catch (e) {
         console.error('Failed to parse result table:', e);
+        return null;
+    }
+}
+
+function parseFromCopiedText(copiedText) {
+    try {
+        console.log('Parsing data from copied text...');
+
+        const lines = copiedText.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+
+        if (lines.length < 3) {
+            console.warn('Not enough lines in copied text');
+            return null;
+        }
+
+        // Find header row (contains | separators and looks like a table header)
+        let headerIndex = -1;
+        for (let i = 0; i < Math.min(10, lines.length); i++) {
+            const line = lines[i];
+            if (line.includes('|') && !line.match(/^[\s\-|]+$/)) {
+                headerIndex = i;
+                break;
+            }
+        }
+
+        if (headerIndex === -1) {
+            console.warn('No table header found in copied text');
+            return null;
+        }
+
+        // Parse headers
+        const headerLine = lines[headerIndex];
+        const headerCells = headerLine.split('|')
+            .map(cell => cell.replace(/\*\*/g, '').replace(/\*/g, '').trim())
+            .filter(cell => cell.length > 0);
+
+        if (headerCells.length === 0) {
+            console.warn('No valid headers found');
+            return null;
+        }
+
+        console.log('Parsed headers:', headerCells);
+
+        // Map column names flexibly
+        const getColIndex = (names) => {
+            for (let name of names) {
+                const idx = headerCells.findIndex(h => h.toLowerCase().includes(name.toLowerCase()));
+                if (idx >= 0) return idx;
+            }
+            return -1;
+        };
+
+        const colMap = {
+            keyword: getColIndex(['keyword', 'input']),
+            label: getColIndex(['label', 'english']),
+            language: getColIndex(['language', 'local tone']),
+            country: getColIndex(['country', 'misspell']),
+            city: getColIndex(['city', 'city kw']),
+            url: getColIndex(['url', 'popular'])
+        };
+
+        // Find data start (skip separator line like ---|---|---)
+        let dataStartIndex = headerIndex + 1;
+        while (dataStartIndex < lines.length && lines[dataStartIndex].match(/^[\s\-|]+$/)) {
+            dataStartIndex++;
+        }
+
+        if (dataStartIndex >= lines.length) {
+            console.warn('No data rows found after header');
+            return null;
+        }
+
+        // Parse data rows
+        const rows = [];
+        for (let i = dataStartIndex; i < lines.length; i++) {
+            const line = lines[i];
+
+            if (!line.includes('|') || line.match(/^[\s\-|]+$/)) continue;
+
+            let cells = line.split('|').map(cell => cell.trim());
+
+            // Remove empty first/last cells (from leading/trailing |)
+            if (cells.length > 0 && cells[0] === '') cells.shift();
+            if (cells.length > 0 && cells[cells.length - 1] === '') cells.pop();
+
+            if (cells.length === 0) continue;
+
+            const getCell = (idx) => idx >= 0 && idx < cells.length ? cells[idx] : '';
+
+            rows.push({
+                inputCountry: getCell(colMap.keyword),
+                englishKW: getCell(colMap.label),
+                localTone: getCell(colMap.language),
+                misspell: getCell(colMap.country),
+                cityKW: getCell(colMap.city),
+                popularUrl: getCell(colMap.url)
+            });
+        }
+
+        console.log(`Parsed ${rows.length} rows from copied text`);
+        return rows.length > 0 ? { headers: headerCells, rows: rows } : null;
+    } catch (e) {
+        console.error('Failed to parse copied text:', e);
         return null;
     }
 }
