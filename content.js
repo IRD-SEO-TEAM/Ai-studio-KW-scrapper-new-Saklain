@@ -14,6 +14,7 @@ let KEYWORD_BATCH_SIZE_LOCKED = false; // Flag to prevent overwriting during ses
 let dynamicBatchSize = DEFAULT_BATCH_SIZE; // Will be updated based on settings
 let useDynamicBatch = false; // Flag to use repetition count as batch size
 let autoCopyResponse = false; // Flag to auto-copy AI response
+let copyWholeSection = false; // NEW: Flag to copy whole section to CSV
 
 // Loop collection variables
 let isLoopCollection = false;
@@ -85,7 +86,13 @@ dont give extra text, give only exact table column output`;
     // Load system prompt from file
     await loadSystemPrompt();
     
-    const state = await chrome.storage.local.get(['collectionState', 'completedInputs', 'keywordBatchSize']);
+    const state = await chrome.storage.local.get(['collectionState', 'completedInputs', 'keywordBatchSize', 'copyWholeSection']);
+    
+    // NEW: Restore copyWholeSection setting
+    if (state.copyWholeSection !== undefined) {
+        copyWholeSection = state.copyWholeSection;
+        console.log(`Copy whole section setting: ${copyWholeSection}`);
+    }
     if (state.collectionState) {
         // FIXED: Only restore state if NOT in multi-tab mode
         // Multi-tab mode tabs will be initialized via startCollection message
@@ -177,6 +184,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         chrome.storage.local.set({ autoCopyResponse: request.enabled });
         autoCopyResponse = request.enabled;
         console.log(`Auto-copy AI response: ${request.enabled}`);
+        sendResponse({success: true});
+    } else if (request.action === 'setCopyWholeSection') {
+        // NEW: Set copy whole section flag
+        chrome.storage.local.set({ copyWholeSection: request.enabled });
+        copyWholeSection = request.enabled;
+        console.log(`Copy whole section: ${request.enabled}`);
         sendResponse({success: true});
     } else if (request.action === 'setKeywordBatchSize') {
         KEYWORD_BATCH_SIZE = request.size;
@@ -1105,7 +1118,17 @@ async function waitForResponseAndScrape(keywordInfo, baselineTablesCount = 0) {
                     if (stableCount >= 2) {
                         const structured = parseResultTable(targetTable);
                         if (structured && structured.rows.length > 0) {
-                            await saveStructuredCityData(logIdentifier, structured, targetTable.outerHTML);
+                            // NEW: Capture whole section if enabled
+                            let wholeSectionData = '';
+                            if (copyWholeSection) {
+                                const modelContainers = document.querySelectorAll('.model-prompt-container[data-turn-role="Model"]');
+                                if (modelContainers.length > 0) {
+                                    const latestContainer = modelContainers[modelContainers.length - 1];
+                                    wholeSectionData = latestContainer.innerText || latestContainer.textContent || '';
+                                }
+                            }
+                            
+                            await saveStructuredCityData(logIdentifier, structured, targetTable.outerHTML, wholeSectionData);
                             console.log(`✅ Scraped ${structured.rows.length} rows for ${logIdentifier}`);
                             
                             if (autoCopyResponse) {
@@ -1250,7 +1273,7 @@ function parseResultTable(tableEl) {
     }
 }
 
-async function saveStructuredCityData(city, structured, rawHtml) {
+async function saveStructuredCityData(city, structured, rawHtml, wholeSectionData = '') {
     try {
         const result = await chrome.storage.local.get(['cityData']);
         const cityData = result.cityData || [];
@@ -1273,6 +1296,7 @@ async function saveStructuredCityData(city, structured, rawHtml) {
                     misspell: row.misspell || '',
                     cityKW: row.cityKW || '',
                     popularUrl: row.popularUrl || '',
+                    wholeSection: wholeSectionData || '', // NEW: Add whole section data
                     timestamp: timestamp,
                     format: 'table-row'
                 });

@@ -75,6 +75,9 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 async function initiateMultiTabCollection(config) {
     const { numberOfTabs, totalKeywords, repetitionCount, startRow, currentProfileUrl, keywordsPerPrompt } = config;
     
+    // Get settings
+    const settings = await chrome.storage.local.get(['repetitionCount', 'useDynamicBatch', 'autoCopyResponse', 'keywordBatchSize', 'numberOfTabs', 'copyWholeSection']);
+    
     console.log(`Initiating serial multi-tab collection: ${numberOfTabs} tabs, ${totalKeywords} keywords, ${keywordsPerPrompt} keywords per prompt`);
     
     // Validate inputs
@@ -140,7 +143,8 @@ async function initiateMultiTabCollection(config) {
         keywordsPerPrompt: keywordsPerPrompt,
         isMultiTabMode: true,
         isSerialMode: true, // Add flag to indicate serial mode
-        tabNumber: 1
+        tabNumber: 1,
+        copyWholeSection: settings.copyWholeSection || false // NEW: Add setting
     };
     
     console.log(`Tab 1 (current tab ${currentTab.id}): keywords ${tab1StartIndex + 1}-${tab1EndIndex}`);
@@ -168,6 +172,7 @@ async function initiateMultiTabCollection(config) {
             isMultiTabMode: true,
             isSerialMode: true, // Add flag to indicate serial mode
             tabNumber: i + 1,
+            copyWholeSection: settings.copyWholeSection || false, // NEW: Add setting
             url: baseProfileIndex > 0 
                 ? `https://aistudio.google.com/u/${baseProfileIndex}/prompts/new_chat`
                 : `https://aistudio.google.com/prompts/new_chat`
@@ -190,7 +195,8 @@ async function initiateMultiTabCollection(config) {
             isMultiTabMode: true,
             isSerialMode: true, // Add flag to indicate serial mode
             tabNumber: 1,
-            totalTabs: numberOfTabs
+            totalTabs: numberOfTabs,
+            copyWholeSection: settings.copyWholeSection || false // NEW: Add setting
         });
         
         console.log(`Started processing on Tab 1 (${currentTab.id})`);
@@ -250,7 +256,8 @@ async function moveToNextTab() {
                             isMultiTabMode: true,
                             isSerialMode: true, // Add flag to indicate serial mode
                             tabNumber: nextTabNumber,
-                            totalTabs: multiTabState.totalTabs
+                            totalTabs: multiTabState.totalTabs,
+                            copyWholeSection: assignment.copyWholeSection || false // NEW: Add setting
                         });
                         
                         console.log(`Started processing on Tab ${nextTabNumber} (${newTab.id})`);

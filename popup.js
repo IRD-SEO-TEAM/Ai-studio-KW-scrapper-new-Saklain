@@ -11,6 +11,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     const repetitionInput = document.getElementById('repetitionCount');
     const useDynamicBatchCheckbox = document.getElementById('useDynamicBatch');
     const autoCopyResponseCheckbox = document.getElementById('autoCopyResponse');
+    const copyWholeSectionToggle = document.getElementById('copyWholeSectionToggle');
     const keywordBatchInput = document.getElementById('keywordBatchSize');
     const numberOfTabsInput = document.getElementById('numberOfTabs');
     const excelFileInput = document.getElementById('excelFileInput');
@@ -58,7 +59,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
     
     // Load saved repetition count, dynamic batch setting and keyword batch size
-    chrome.storage.local.get(['repetitionCount', 'useDynamicBatch', 'autoCopyResponse', 'keywordBatchSize', 'numberOfTabs'], (result) => {
+    chrome.storage.local.get(['repetitionCount', 'useDynamicBatch', 'autoCopyResponse', 'keywordBatchSize', 'numberOfTabs', 'copyWholeSection'], (result) => {
         if (repetitionInput) {
             repetitionInput.value = result.repetitionCount || 1;
         }
@@ -73,6 +74,10 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
         if (numberOfTabsInput) {
             numberOfTabsInput.value = result.numberOfTabs || 1;
+        }
+        // NEW: Load copyWholeSection setting
+        if (copyWholeSectionToggle) {
+            copyWholeSectionToggle.checked = result.copyWholeSection || false;
         }
     });
     
@@ -134,6 +139,28 @@ document.addEventListener('DOMContentLoaded', async function() {
                 console.log(`Auto-copy response setting updated to: ${enabled}`);
             } catch (error) {
                 console.error('Error setting auto-copy response:', error);
+            }
+        });
+    }
+
+    // NEW: Save copy whole section setting when changed
+    if (copyWholeSectionToggle) {
+        copyWholeSectionToggle.addEventListener('change', async (e) => {
+            const enabled = e.target.checked;
+            
+            // Save to storage
+            await chrome.storage.local.set({ copyWholeSection: enabled });
+            
+            // Send to content script
+            try {
+                const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+                chrome.tabs.sendMessage(tab.id, {
+                    action: 'setCopyWholeSection',
+                    enabled: enabled
+                });
+                console.log(`Copy whole section setting updated to: ${enabled}`);
+            } catch (error) {
+                console.error('Error setting copy whole section:', error);
             }
         });
     }
@@ -553,9 +580,10 @@ document.addEventListener('DOMContentLoaded', async function() {
         const hasStructured = sortedData.some(r => r.format === 'table-row' || r.format === 'table' || (r.englishKW || r.localTone || r.misspell || r.cityKW || r.popularUrl));
         let headers;
         if (hasStructured) {
-            headers = ['Row_Number', 'Input_Country', 'English KW', 'local tone', 'misspell', 'city kw', 'popular url', 'Timestamp']; // ADDED: Row_Number column
+            // NEW: Add 'Whole_Section' column
+            headers = ['Row_Number', 'Input_Country', 'English KW', 'local tone', 'misspell', 'city kw', 'popular url', 'Whole_Section', 'Timestamp'];
         } else {
-            headers = ['Row_Number', 'City', 'Response', 'Timestamp']; // ADDED: Row_Number column
+            headers = ['Row_Number', 'City', 'Response', 'Timestamp'];
         }
         
         const csvRows = [headers.join(',')];
@@ -577,6 +605,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                         escape(row.misspell || ''),
                         escape(row.cityKW || ''),
                         escape(row.popularUrl || ''),
+                        escape(row.wholeSection || ''), // NEW: Add whole section data
                         escape(row.timestamp || '')
                     ];
                     csvRows.push(values.join(','));
