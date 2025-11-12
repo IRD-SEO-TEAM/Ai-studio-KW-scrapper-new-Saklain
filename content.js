@@ -663,6 +663,7 @@ async function enableGoogleSearchGrounding() {
             if (!isChecked) {
                 toggle.click();
                 await wait(600);
+                if (!isCollecting) return;
                 console.log('Grounding with Google Search enabled');
             } else {
                 console.log('Grounding with Google Search already enabled');
@@ -734,6 +735,10 @@ async function processNextCity() {
         citiesInCurrentBatch = 0;
         // Wait for UI to be ready after starting new chat
         await wait(2000);
+        if (!isCollecting) {
+            isProcessing = false;
+            return;
+        }
     }
     
     if (citiesInCurrentBatch === 0) {
@@ -741,6 +746,10 @@ async function processNextCity() {
         if (isEmpty) {
             console.log('System instructions box is empty, setting up system instructions...');
             await setSystemInstructions();
+            if (!isCollecting) {
+                isProcessing = false;
+                return;
+            }
         }
     }
 
@@ -765,9 +774,17 @@ async function processNextCity() {
         
         await updateStatus(`Processing batch of ${batchOfKeywords.length} starting with: "${displayKeyword}" (Row ${actualRowNumber})`);
         await updateProgress(currentIndex + batchOfKeywords.length, originalCityList.length, `Batch: ${displayKeyword}...`);
-        
+
         await clearChatInput();
+        if (!isCollecting) {
+            isProcessing = false;
+            return;
+        }
         await typeInChatInput(promptText);
+        if (!isCollecting) {
+            isProcessing = false;
+            return;
+        }
         await wait(500);
 
         if (!isCollecting) {
@@ -777,13 +794,21 @@ async function processNextCity() {
 
         const baselineTablesCount = document.querySelectorAll('div.table-container table, table').length;
         await clickRunButton();
-        
+        if (!isCollecting) {
+            isProcessing = false;
+            return;
+        }
+
         // ADD notification for first task submission
         // Notify first task submission for multi-tab sequential creation
         if (typeof window.notifyFirstTaskSubmitted === 'function') {
             await window.notifyFirstTaskSubmitted();
         }
-        
+        if (!isCollecting) {
+            isProcessing = false;
+            return;
+        }
+
         await updateStatus(`Waiting for AI response for batch: "${firstKeyword}"...`);
         await waitForResponseAndScrape(batchOfKeywords, baselineTablesCount);
 
@@ -793,11 +818,15 @@ async function processNextCity() {
         }
 
         citiesInCurrentBatch++;
-        
+
         for (const keyword of batchOfKeywords) {
             await checkAndDownloadForDuplicateInput(keyword);
+            if (!isCollecting) {
+                isProcessing = false;
+                return;
+            }
         }
-        
+
         currentIndex += batchOfKeywords.length;
         inputsProcessedInThisTab += batchOfKeywords.length;
         await saveCollectionState();
@@ -864,14 +893,26 @@ async function retryFailedInputs() {
     await saveCollectionState();
     
     await updateStatus(`Starting new chat to retry failed input: ${failedInput}...`);
-    
+
     await startNewChatSession();
+    if (!isCollecting) {
+        isRetryingFailedInput = false;
+        return;
+    }
     citiesInCurrentBatch = 0;
-    
+
     try {
         await updateStatus(`Retrying: ${failedInput}...`);
         await clearChatInput();
+        if (!isCollecting) {
+            isRetryingFailedInput = false;
+            return;
+        }
         await typeInChatInput(failedInput);
+        if (!isCollecting) {
+            isRetryingFailedInput = false;
+            return;
+        }
         await wait(500);
 
         if (!isCollecting) {
@@ -881,10 +922,18 @@ async function retryFailedInputs() {
 
         const baselineTablesCount = document.querySelectorAll('div.table-container table, table').length;
         await clickRunButton();
-        
+        if (!isCollecting) {
+            isRetryingFailedInput = false;
+            return;
+        }
+
         await updateStatus(`Waiting for AI response for ${failedInput} (retry attempt)...`);
         await waitForResponseAndScrape(failedInput, baselineTablesCount);
-        
+        if (!isCollecting) {
+            isRetryingFailedInput = false;
+            return;
+        }
+
         citiesInCurrentBatch++;
         await checkAndDownloadForDuplicateInput(failedInput);
         
@@ -976,7 +1025,8 @@ async function handleSkipButtonIfPresent() {
     try {
         // Wait a moment for skip button to potentially appear
         await wait(800);
-        
+        if (!isCollecting) return;
+
         // Try multiple selectors to find skip button
         let skipButton = document.querySelector('button[data-test-id="skip-button"]');
         
@@ -997,6 +1047,7 @@ async function handleSkipButtonIfPresent() {
             console.log('Skip button detected, clicking...');
             skipButton.click();
             await wait(500);
+            if (!isCollecting) return;
             console.log('✅ Skip button clicked successfully');
         }
     } catch (error) {
@@ -1071,6 +1122,10 @@ async function waitForResponseAndScrape(keywordInfo, baselineTablesCount = 0) {
             console.log(`Still waiting for ${logIdentifier} response... (${attempts}s elapsed)`);
         }
         await wait(1000);
+        if (!isCollecting) {
+            console.log('🛑 Response wait aborted - collection stopped');
+            throw new Error('Collection stopped by user');
+        }
         attempts++;
     }
 
@@ -1454,7 +1509,11 @@ async function setSystemInstructions() {
         systemButton.click();
         console.log('System instructions button clicked');
         await wait(1000);
-        
+        if (!isCollecting) {
+            console.log('🛑 setSystemInstructions aborted - collection stopped');
+            return;
+        }
+
         const textarea = document.querySelector('textarea[aria-label="System instructions"], ms-system-instructions textarea');
         if (!textarea) {
             console.warn('System instructions textarea not found');
@@ -1466,7 +1525,11 @@ async function setSystemInstructions() {
         textarea.dispatchEvent(new Event('change', { bubbles: true }));
         console.log('System instructions set successfully');
         await wait(500);
-        
+        if (!isCollecting) {
+            console.log('🛑 setSystemInstructions aborted after setting - collection stopped');
+            return;
+        }
+
         const closeButton = document.querySelector('button[data-test-close-button], button[mat-dialog-close], button[aria-label="Close panel"]');
         if (closeButton) {
             closeButton.click();
@@ -1507,13 +1570,21 @@ async function startNewChatSession() {
         newChatButton.click();
         console.log('Clicked new chat button - tab remains open');
         await waitForUiReady(6000);
+        if (!isCollecting) {
+            console.log('🛑 startNewChatSession aborted after UI ready - collection stopped');
+            return;
+        }
         console.log('New chat UI ready in the same tab');
-        
+
         // Reload batch size from storage after new chat session
         await ensureBatchSizeLoaded();
-        
+
         // Re-enable Google Search grounding
         await enableGoogleSearchGrounding();
+        if (!isCollecting) {
+            console.log('🛑 startNewChatSession aborted after grounding - collection stopped');
+            return;
+        }
         
         // Re-set system instructions if empty
         const isEmpty = await isSystemInstructionsEmpty();
