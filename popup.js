@@ -16,9 +16,78 @@ document.addEventListener('DOMContentLoaded', async function() {
     const numberOfTabsInput = document.getElementById('numberOfTabs');
     const excelFileInput = document.getElementById('excelFileInput');
     const fileStatus = document.getElementById('fileStatus');
-    
+
     let isRunning = false;
-    
+
+    // Function to save complete UI state to storage
+    async function savePopupUIState() {
+        try {
+            const uiState = {
+                isRunning: isRunning,
+                runBtnDisabled: runBtn.disabled,
+                stopBtnDisabled: stopBtn.disabled,
+                statusText: status.textContent,
+                progressWidth: progressBar.style.width,
+                currentCityText: currentCity.textContent,
+                progressText: progress.textContent,
+                timestamp: new Date().toISOString()
+            };
+            await chrome.storage.local.set({ popupUIState: uiState });
+            console.log('Popup UI state saved:', uiState);
+        } catch (error) {
+            console.error('Error saving popup UI state:', error);
+        }
+    }
+
+    // Function to restore complete UI state from storage
+    async function restorePopupUIState() {
+        try {
+            const result = await chrome.storage.local.get(['popupUIState']);
+            if (result.popupUIState) {
+                const uiState = result.popupUIState;
+                isRunning = uiState.isRunning || false;
+
+                // Restore button states
+                if (runBtn) runBtn.disabled = uiState.runBtnDisabled !== false;
+                if (stopBtn) stopBtn.disabled = uiState.stopBtnDisabled !== false;
+
+                // Restore status
+                if (status) status.textContent = uiState.statusText || 'Ready to start';
+
+                // Restore progress bar
+                if (progressBar) progressBar.style.width = uiState.progressWidth || '0%';
+
+                // Restore progress text
+                if (currentCity) currentCity.textContent = uiState.currentCityText || '-';
+                if (progress) progress.textContent = uiState.progressText || '0/0';
+
+                console.log('Popup UI state restored:', uiState);
+                return true;
+            }
+            return false;
+        } catch (error) {
+            console.error('Error restoring popup UI state:', error);
+            return false;
+        }
+    }
+
+    // Function to restore file upload status
+    async function restoreFileUploadStatus() {
+        try {
+            const result = await chrome.storage.local.get(['uploadedFileName']);
+            if (result.uploadedFileName && fileStatus) {
+                fileStatus.textContent = `✓ ${result.uploadedFileName} uploaded`;
+                fileStatus.style.color = 'green';
+            }
+        } catch (error) {
+            console.error('Error restoring file upload status:', error);
+        }
+    }
+
+    // Save popup state when window is about to close/unload
+    window.addEventListener('beforeunload', savePopupUIState);
+    window.addEventListener('unload', savePopupUIState);
+
     // Initialize stop button as disabled
     if (stopBtn) {
         stopBtn.disabled = true;
@@ -80,6 +149,9 @@ document.addEventListener('DOMContentLoaded', async function() {
             copyWholeSectionToggle.checked = result.copyWholeSection || false;
         }
     });
+
+    // Restore file upload status
+    restoreFileUploadStatus();
     
     // Save repetition count when changed
     if (repetitionInput) {
@@ -232,21 +304,27 @@ document.addEventListener('DOMContentLoaded', async function() {
             runBtn.disabled = true;
             stopBtn.disabled = true;
         } else {
-            // Restore state from storage
-            await restoreState();
+            // Try to restore UI state first (from previous popup session)
+            const uiStateRestored = await restorePopupUIState();
+
+            // If UI state was restored and shows running, don't overwrite it
+            if (!uiStateRestored) {
+                // Otherwise, restore state from storage normally
+                await restoreState();
+            }
         }
     });
-    
+
     // Function to restore UI state
     async function restoreState() {
         try {
             const state = await chrome.storage.local.get(['collectionState', 'cityData']);
             const collectionState = state.collectionState;
             const cityData = state.cityData || [];
-            
+
             // Update storage count
             updateStorageCount(cityData.length);
-            
+
             if (collectionState && collectionState.isCollecting) {
                 // Collection is running, restore running UI
                 isRunning = true;
@@ -254,28 +332,28 @@ document.addEventListener('DOMContentLoaded', async function() {
                 runBtn.disabled = true;
                 stopBtn.style.display = 'block';
                 stopBtn.disabled = false;
-                
+
                 // Restore progress
                 const current = collectionState.currentIndex || 0;
                 const total = collectionState.totalCities || 0;
                 const city = collectionState.currentCity || '-';
                 const isLoopCollection = collectionState.isLoopCollection || false;
                 const loopIteration = collectionState.loopIteration || 0;
-                
+
                 const actualTotal = collectionState.totalCities || cityList.length || total;
                 if (actualTotal > 0) {
                     const percentage = (current / actualTotal) * 100;
                     progressBar.style.width = percentage + '%';
-                    
+
                     // Update city display with loop information
                     let cityDisplay = city;
                     if (isLoopCollection) {
                         cityDisplay = `Loop ${loopIteration}: ${city}`;
                     }
                     currentCity.textContent = cityDisplay;
-                    
+
                     progress.textContent = `${current}/${actualTotal}`;
-                    
+
                     let statusMessage = `Processing: ${city}`;
                     if (isLoopCollection) {
                         statusMessage = `Loop ${loopIteration} - ${statusMessage}`;
@@ -320,20 +398,25 @@ document.addEventListener('DOMContentLoaded', async function() {
             // Send message to content script to clear progress
             const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
             chrome.tabs.sendMessage(tab.id, { action: 'clearProgress' });
-            
+
             // Clear UI
-            await chrome.storage.local.set({ 
+            await chrome.storage.local.set({
                 cityData: [],
-                collectionState: null 
+                collectionState: null
             });
             updateStorageCount(0);
             progressBar.style.width = '0%';
             currentCity.textContent = '-';
             progress.textContent = '0/0';
             status.textContent = 'Storage cleared';
+
+            // Save cleared state
+            await savePopupUIState();
         } catch (e) {
             console.error('Error clearing storage:', e);
             status.textContent = 'Error clearing storage';
+            // Save error state
+            await savePopupUIState();
         }
     });
     
@@ -451,19 +534,24 @@ document.addEventListener('DOMContentLoaded', async function() {
                 stopBtn.style.display = 'block';
                 stopBtn.disabled = false;
                 status.textContent = 'Starting collection...';
-                
+
+                // Save state before starting
+                await savePopupUIState();
+
                 const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
                 if (!tab.url.includes('aistudio.google.com')) {
                     throw new Error('Please navigate to AI Studio first');
                 }
-                
+
                 const response = await chrome.tabs.sendMessage(tab.id, {
                     action: 'startCollection',
                     startRow: startRow
                 });
-                
+
                 if (response && response.success) {
                     status.textContent = 'Collection started - processing keywords...';
+                    // Save state again after confirmation
+                    await savePopupUIState();
                 } else {
                     throw new Error(response?.error || 'Failed to start collection');
                 }
@@ -475,13 +563,16 @@ document.addEventListener('DOMContentLoaded', async function() {
                 stopBtn.style.display = 'block';
                 stopBtn.disabled = false;
                 status.textContent = `Pre-initializing ${numberOfTabs} tabs...`;
-                
+
+                // Save state before starting
+                await savePopupUIState();
+
                 // Wait a moment for UI update
                 await new Promise(resolve => setTimeout(resolve, 100));
-                
+
                 // Get current tab URL to extract profile
                 const [currentTab] = await chrome.tabs.query({active: true, currentWindow: true});
-                
+
                 // Send to background script to orchestrate multi-tab processing
                 chrome.runtime.sendMessage({
                     action: 'initiateMultiTabCollection',
@@ -492,6 +583,9 @@ document.addEventListener('DOMContentLoaded', async function() {
                     startRow: startRow,
                     currentProfileUrl: currentTab.url
                 });
+
+                // Save state again after sending
+                await savePopupUIState();
             }
         } catch (error) {
             console.error('Error starting collection:', error);
@@ -506,14 +600,17 @@ document.addEventListener('DOMContentLoaded', async function() {
     
     function stopCollection() {
         console.log('🛑 Stop button clicked - sending stop signal');
-        
+
         isRunning = false;
         runBtn.style.display = 'block';
         runBtn.disabled = false;
         stopBtn.style.display = 'block';
         stopBtn.disabled = true;
         status.textContent = 'Stopping collection...';
-        
+
+        // Save state immediately on stop
+        savePopupUIState();
+
         // Send IMMEDIATE stop message to ALL tabs (not just active)
         chrome.tabs.query({url: 'https://aistudio.google.com/*'}, function(tabs) {
             tabs.forEach(tab => {
@@ -524,13 +621,15 @@ document.addEventListener('DOMContentLoaded', async function() {
                 });
             });
         });
-        
+
         // Also clear collection state immediately
-        chrome.storage.local.set({ 
-            collectionState: null 
+        chrome.storage.local.set({
+            collectionState: null
         }).then(() => {
             status.textContent = 'Collection stopped';
             console.log('🛑 Stop signal sent to all tabs and state cleared');
+            // Save final stop state
+            savePopupUIState();
         });
     }
     
@@ -627,33 +726,41 @@ document.addEventListener('DOMContentLoaded', async function() {
     chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
         if (request.action === 'updateStatus') {
             status.textContent = request.message;
+            // Save state on status update
+            savePopupUIState();
         } else if (request.action === 'updateProgress') {
             const percentage = (request.current / request.total) * 100;
             progressBar.style.width = percentage + '%';
-            
+
             // Update current city display with loop information
             let cityDisplay = request.currentCity || '-';
             if (request.isLoopCollection) {
                 cityDisplay = `Loop ${request.loopIteration}: ${cityDisplay}`;
             }
             currentCity.textContent = cityDisplay;
-            
+
             progress.textContent = `${request.current}/${request.total}`;
+
+            // Save state on progress update
+            savePopupUIState();
         } else if (request.action === 'collectionComplete') {
             isRunning = false;
             runBtn.style.display = 'block';
             runBtn.disabled = false;
             stopBtn.style.display = 'block';
             stopBtn.disabled = true;
-            
+
             let completeMessage = `Collection complete! Processed ${request.total} cities`;
             if (request.loopIterations && request.loopIterations > 0) {
                 completeMessage += ` (${request.loopIterations} loop iterations)`;
             }
             status.textContent = completeMessage;
-            
+
             // Clear collection state
             chrome.storage.local.set({ collectionState: null });
+
+            // Save final state
+            savePopupUIState();
         } else if (request.action === 'autoDownload') {
             // Auto-download triggered by storage quota
             if (request.data && request.data.length > 0) {

@@ -1,0 +1,13 @@
+            <div style="margin-top: 8px;">
+                <label style="display: flex; align-items: center; cursor: pointer;">
+                    <input type="checkbox" id="autoCopyResponse" style="margin-right: 6px;">
+                    <span style="font-size: 12px;">Auto-copy AI response as text</span>
+                </label>
+            </div>
+            <!-- NEW: Add toggle for copying whole section to CSV -->
+            <div style="margin-top: 8px;">
+                <label style="display: flex; align-items: center; cursor: pointer;">
+                    <input type="checkbox" id="copyWholeSectionToggle" style="margin-right: 6px;">
+                    <span style="font-size: 12px;">Copy whole section to CSV</span>
+                </label>
+            </div>
